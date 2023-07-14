@@ -29,7 +29,7 @@ def color_rainbow(strip, wait_ms=20, iterations=5):
         strip.show()
         time.sleep(wait_ms / 1000.0)
 
-        
+     
 #　color code をRGBに変換
 def hex_to_rgb(hex_code):
     hex_code = hex_code.lstrip('#')
