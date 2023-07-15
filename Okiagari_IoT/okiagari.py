@@ -7,6 +7,7 @@ import RPi.GPIO as GPIO
 from pydub import AudioSegment
 import requests
 import datetime
+import asyncio
 
 # LED strip configuration:
 LED_COUNT = 16        # Number of LED pixels.
@@ -21,37 +22,37 @@ LED_CHANNEL = 0       # set to '1' for GPIOs 13, 19, 41, 45 or 53
 strip = PixelStrip(LED_COUNT, LED_PIN, LED_FREQ_HZ, LED_DMA, LED_INVERT, LED_BRIGHTNESS, LED_CHANNEL)
 strip.begin()
 
+#pathの定義
+voicevox_core_path = "/home/pi/Okiagari_IoT/voicevox_core-0.11.4/example/python/"
+audio_path = "/home/pi/AizuHack2023/Okiagari_IoT/audio"
+music_path = "/home/pi/AizuHack2023/Reminder_flask_server/musics/"
+
 #定型文の定義
-recent_sentence1 = AudioSegment.from_wav("/home/pi/Okiagari_IoT/audio/sentence/直近5件のタスクをお伝えします。-1.wav")
-recent_sentence2 = AudioSegment.from_wav("/home/pi/Okiagari_IoT/audio/sentence/現在のタスクは、-1.wav")
-recent_sentence3 = AudioSegment.from_wav("/home/pi/Okiagari_IoT/audio/sentence/です。-1.wav")
+recent_sentence1 = AudioSegment.from_wav(f"{audio_path}/sentence/直近5件のタスクをお伝えします。-1.wav")
+recent_sentence2 = AudioSegment.from_wav(f"{audio_path}/sentence/現在のタスクは、-1.wav")
+recent_sentence3 = AudioSegment.from_wav(f"{audio_path}/sentence/です。-1.wav")
 
 #応援の定型文の定義(Path)
 encourage_audio_paths = [
-    "/home/pi/Okiagari_IoT/audio/encourage/頑張ってください。-1.wav",
-    "/home/pi/Okiagari_IoT/audio/encourage/応援しています。-1.wav",
-    "/home/pi/Okiagari_IoT/audio/encourage/ファイトです！。-1.wav"
+    f"{audio_path}/encourage/頑張ってください。-1.wav",
+    f"{audio_path}/encourage/応援しています。-1.wav",
+    f"{audio_path}/encourage/ファイトです！。-1.wav"
 ]
 
-voicevox_core_path = "/home/pi/Okiagari_IoT/voicevox_core-0.11.4/example/python/"
+speaker_id = 1  # ずんだもんのスピーカーID
 
 #PIN 17のボタンの処理
 #直近の5件のタスクを音声でおしえてくれる
-def execute_recent_task(task_data):  
-    print("ボタンが押されました")
-    recent_task = task_data  
-    speaker_id = 1  # ずんだもんのスピーカーID
-
-    # タスクの音声合成
-    command = f"cd {voicevox_core_path} && su pi -c 'python3 run.py --text \"{recent_task}\" --speaker_id {speaker_id}'"
-    os.system(command)
-    task = AudioSegment.from_wav(f"{voicevox_core_path}" + recent_task + "-1.wav")
-    sentence = recent_sentence1 + recent_sentence2 + task + recent_sentence3
+async def execute_recent_task():  
+    print("タスクを流します")
+    recent_tasks = get_tasks()
+    tasks_audio = generete_tasks_voice(recent_tasks)
+    
+    sentence = recent_sentence1 + recent_sentence2 + tasks_audio + recent_sentence3
     # 結合されたサウンドを保存
-    sentence.export("audio/recent/sentence.wav", format="wav")
+    sentence.export("audio/recent/tasks_sentence.wav", format="wav")
     #音楽の再生
-    os.system("su pi -c \"aplay /home/pi/Okiagari_IoT/audio/recent/sentence.wav\"")
-    time.sleep(3)
+    os.system(f"su pi -c \"aplay {audio_path}/recent/tasks_sentence.wav\"")
     
     #応援文の作成
     audio = random.choice(encourage_audio_paths)
@@ -61,25 +62,26 @@ def execute_recent_task(task_data):
 
 #PIN 23のボタンの処理
 #流れている音声を中止して、現在のタスクを音声でおしえてくれる
-def execute_stop_task():
-    recent_task = task_data[0] 
-    speaker_id = 1 #ずんだもんのスピーカーID
+async def execute_stop_task():
+    recent_task = get_recent_tasks()
+    single_task_audio = generete_single_task_voice(recent_task)
     
-    os.system("su pi -c \"killall aplay\"")
+    #音楽の停止
+    os.system("su pi -c 'killall aplay'")
+    #アナウンスの再生
+    #現在のタスクを取得中です。しばらくお待ちください。
 
-    command = f"cd {voicevox_core_path} && su pi -c 'python3 run.py --text \"{recent_task}\" --speaker_id {speaker_id}'"
-    os.system(command)
-    task = AudioSegment.from_wav(f"{voicevox_core_path}" + recent_task + "-1.wav")
-    sentence = recent_sentence2 + task + recent_sentence3
-    sentence.export("audio/recent/sentence.wav", format="wav")
+    sentence = recent_sentence2 + single_task_audio + recent_sentence3
+    sentence.export("audio/recent/single_task_sentence.wav", format="wav")
 
-    os.system("su pi -c \"aplay /home/pi/Okiagari_IoT/audio/recent/sentence.wav\"")
+    os.system(f"su pi -c \"aplay {audio_path}/recent/single_task_sentence.wav\"")
     time.sleep(3)
     
     #応援文の作成
     audio = random.choice(encourage_audio_paths)
     AudioSegment.from_wav(audio)
     os.system(f"su pi -c \"aplay {audio}\"")
+
 
 #GPIOの設定
 BUTTON1_PIN = 17
@@ -92,96 +94,85 @@ GPIO.setmode(GPIO.BCM)
 GPIO.setup(BUTTON2_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 GPIO.add_event_detect(BUTTON2_PIN, GPIO.FALLING, callback=execute_stop_task, bouncetime=200)
 
+
 #音楽の再生
-def play_music():
+async def play_music(filename):
     print('音楽を再生しました')
 
-    # POSTリクエストから音楽のIDを取得
-    music = get_set_music()
-    music.export("audio/music/music.wav", format="wav")
-
     #音楽の再生
-    os.system("su pi -c \"aplay /home/pi/Okiagari_IoT/audio/music/music.wav\"")
+    os.system(f"su pi -c \"aplay {music_path}{filename}\"")
     
-
-#色の変更
-def change_color():
-    print('色を変更しました')
-    color = get_set_color() #color code を取得
-    #色の文字列をRGBに変換
-    rgb = hex_to_rgb(color)
-    #色を表示    
-    colorWipe(strip, Color(rgb[0], rgb[1], rgb[2]))
-
-
-def turn_off():
+#LEDの消灯
+async def turn_off():
     print('LEDを消灯しました')
+    colorWipe(strip, Color(0, 0, 0)) 
     colorWipe(strip, Color(0, 0, 0))  
+
+#最新のタスクの音声合成
+async def generete_single_task_voice(recent_task):
+        task_name = f"{recent_task['name']}"
+        command = f"cd {voicevox_core_path} && su pi -c 'python3 run.py --text '{task_name}', ' --speaker_id {speaker_id}'"
+        os.system(command)
+
+        single_task_audio = AudioSegment.from_wav(f"{voicevox_core_path}" + task_name + "-1.wav")
+        single_task_audio.export("audio/recent/recent_tasks.wav", format="wav")
+
+        return single_task_audio
+
+
+#最新の5個のタスクの音声合成
+async def generete_tasks_voice(recent_tasks):
+        recent_5_tasks = recent_tasks[:5]   # 最新の5件のタスクを取得
+        recent_5_tasks_name = f"{recent_5_tasks[0]['name']}, {recent_5_tasks[1]['task_name']}, {recent_5_tasks[2]['name']}, {recent_5_tasks[3]['name']}, {recent_5_tasks[4]['name']}"
+        # recent_5_tasksの音声合成 5個一気に音声合成する
+        command = f"cd {voicevox_core_path} && su pi -c 'python3 run.py --text '{recent_5_tasks_name}', ' --speaker_id {speaker_id}'"
+        os.system(command)
+
+        tasks_audio = AudioSegment.from_wav(f"{voicevox_core_path}" + recent_5_tasks_name + "-1.wav")
+        tasks_audio.export("audio/recent/recent_tasks.wav", format="wav")
+
+        return tasks_audio
 
 
 #タスクの取得
-def get_recent_tasks():
+async def get_tasks():
     server_url = '' #サーバーのURL
     response = requests.get(server_url)
     if response.status_code == 200:
-        global task_data
-        task_data = response.json()
+        tasks_data = response.json()
+        return tasks_data
     else:
         print('タスクの取得に失敗しました')
 
-#曲の取得
-def get_set_music():
+#最新のタスクの取得
+async def get_recent_tasks():
     server_url = '' #サーバーのURL
     response = requests.get(server_url)
     if response.status_code == 200:
-        music_data = response.json()
-        music = AudioSegment.from_wav(f"audio/music/{music_data['music_name']}")
-        return music
+        tasks_data = response.json()
+        return tasks_data[0]
     else:
-        print('音楽の取得に失敗しました')
+        print('最新のタスクの取得に失敗しました')
 
-#色の取得
-def get_set_color():
-    server_url = '' #サーバーのURL
-    response = requests.get(server_url)
-    if response.status_code == 200:
-        color_data = response.json()
-        return color_data['color']
-    else:
-        print('色の取得に失敗しました')
-
-
+#color flag
+color_flag = False
 
 while True:
-    
-    get_recent_tasks()
+
+    #締め切り時間を過ぎたら音楽を流す処理
+    task = get_recent_tasks()
+    recent_until_time = task['until']
     current_time = datetime.datetime.now()
+    until_time = datetime.datetime.strptime(recent_until_time, '%Y-%m-%d %H:%M:%S')
 
-    for task in task_data:
-        deadline = datetime.datetime.strptime(task['deadline'], '%Y-%m-%d %H:%M:%S')
+    time_difference = until_time - current_time
 
-        # タスクの締め切り時間との差を計算
-        time_difference = deadline - current_time
-
-        
-        if 3 <= time_difference.total_seconds() // 3600 < 4:
-            play_music()
-
-        
-        if 1 <= time_difference.total_seconds() // 3600 < 2:
-            play_music()
-                
-        if 30 <= time_difference.total_seconds() // 60 < 31:
-            play_music()
-
-        
-        if 10 <= time_difference.total_seconds() // 60 < 11:
-            play_music()
-
-        
-        if 5 <= time_difference.total_seconds() // 60 < 6:
-            play_music()
-            color_rainbow()
-
-    time.sleep(5)
+    if time_difference.total_seconds() < 0:
+        play_music()
+        color_rainbow(strip) 
+        time.sleep(15)
+        turn_off() 
     
+
+   
+ 
