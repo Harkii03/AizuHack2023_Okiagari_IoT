@@ -13,7 +13,7 @@ def wheel(pos):
         pos -= 170
         return Color(0, pos * 3, 255 - pos * 3)
     
-def colorWipe(strip, color, wait_ms=100):
+def colorWipe(strip, color, wait_ms=200):
     """Wipe color across display a pixel at a time."""
     for i in range(strip.numPixels()):
         strip.setPixelColor(i, color)
