@@ -171,7 +171,5 @@ async def main():
             time.sleep(20)
             turn_off() 
 
-asyncio.run(main())   
-
-   
+asyncio.run(main())      
  
