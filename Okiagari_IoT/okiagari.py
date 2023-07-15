@@ -2,7 +2,7 @@ import os
 import time
 import random
 from lib_rpi.rpi_ws281x import PixelStrip, Color
-from library.__led__ import colorWipe, hex_to_rgb, color_rainbow
+from library.__led__ import colorWipe, color_rainbow
 import RPi.GPIO as GPIO
 from pydub import AudioSegment
 import requests
@@ -43,7 +43,7 @@ speaker_id = 1  # ずんだもんのスピーカーID
 
 #PIN 17のボタンの処理
 #直近の5件のタスクを音声でおしえてくれる
-async def execute_recent_task():  
+def execute_recent_task():  
     print("タスクを流します")
     recent_tasks = get_tasks()
     tasks_audio = generete_tasks_voice(recent_tasks)
@@ -59,12 +59,10 @@ async def execute_recent_task():
     AudioSegment.from_wav(audio)
     os.system(f"su pi -c \"aplay {audio}\"")
 
-
+global single_task_audio
 #PIN 23のボタンの処理
 #流れている音声を中止して、現在のタスクを音声でおしえてくれる
 async def execute_stop_task():
-    recent_task = get_recent_tasks()
-    single_task_audio = generete_single_task_voice(recent_task)
     
     #音楽の停止
     os.system("su pi -c 'killall aplay'")
@@ -96,20 +94,19 @@ GPIO.add_event_detect(BUTTON2_PIN, GPIO.FALLING, callback=execute_stop_task, bou
 
 
 #音楽の再生
-async def play_music(filename):
+def play_music(filename):
     print('音楽を再生しました')
 
-    #音楽の再生
     os.system(f"su pi -c \"aplay {music_path}{filename}\"")
     
 #LEDの消灯
-async def turn_off():
+def turn_off():
     print('LEDを消灯しました')
     colorWipe(strip, Color(0, 0, 0)) 
     colorWipe(strip, Color(0, 0, 0))  
 
 #最新のタスクの音声合成
-async def generete_single_task_voice(recent_task):
+def generete_single_task_voice(recent_task):
         task_name = f"{recent_task['name']}"
         command = f"cd {voicevox_core_path} && su pi -c 'python3 run.py --text '{task_name}', ' --speaker_id {speaker_id}'"
         os.system(command)
@@ -121,7 +118,7 @@ async def generete_single_task_voice(recent_task):
 
 
 #最新の5個のタスクの音声合成
-async def generete_tasks_voice(recent_tasks):
+def generete_tasks_voice(recent_tasks):
         recent_5_tasks = recent_tasks[:5]   # 最新の5件のタスクを取得
         recent_5_tasks_name = f"{recent_5_tasks[0]['name']}, {recent_5_tasks[1]['task_name']}, {recent_5_tasks[2]['name']}, {recent_5_tasks[3]['name']}, {recent_5_tasks[4]['name']}"
         # recent_5_tasksの音声合成 5個一気に音声合成する
@@ -135,8 +132,8 @@ async def generete_tasks_voice(recent_tasks):
 
 
 #タスクの取得
-async def get_tasks():
-    server_url = '' #サーバーのURL
+def get_tasks():
+    server_url = '192,168.10.108:8000/notification' #サーバーのURL
     response = requests.get(server_url)
     if response.status_code == 200:
         tasks_data = response.json()
@@ -145,34 +142,36 @@ async def get_tasks():
         print('タスクの取得に失敗しました')
 
 #最新のタスクの取得
-async def get_recent_tasks():
-    server_url = '' #サーバーのURL
+def get_recent_tasks():
+    server_url = '192,168.10.108:8000/notification' #サーバーのURL
     response = requests.get(server_url)
     if response.status_code == 200:
         tasks_data = response.json()
-        return tasks_data[0]
+        return tasks_data
     else:
         print('最新のタスクの取得に失敗しました')
 
-#color flag
-color_flag = False
 
-while True:
+async def main():
+    while True:
 
-    #締め切り時間を過ぎたら音楽を流す処理
-    task = get_recent_tasks()
-    recent_until_time = task['until']
-    current_time = datetime.datetime.now()
-    until_time = datetime.datetime.strptime(recent_until_time, '%Y-%m-%d %H:%M:%S')
+        #締め切り時間を過ぎたら音楽を流す処理
+        task = get_recent_tasks()
+        recent_task = task
+        recent_until_time = task['notice']
+        current_time = datetime.datetime.now()
+        until_time = datetime.datetime.strptime(recent_until_time, '%Y-%m-%d %H:%M:%S')
 
-    time_difference = until_time - current_time
+        time_difference = until_time - current_time
 
-    if time_difference.total_seconds() < 0:
-        play_music()
-        color_rainbow(strip) 
-        time.sleep(15)
-        turn_off() 
-    
+        if time_difference.total_seconds() < 0:
+            filepath = ''
+            color_rainbow(strip)
+            await asyncio.gather(play_music(filepath), generete_single_task_voice(recent_task["file_name"])) 
+            time.sleep(20)
+            turn_off() 
+
+asyncio.run(main())   
 
    
  
